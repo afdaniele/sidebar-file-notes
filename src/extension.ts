@@ -1,60 +1,73 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
+import { promises as fs } from 'fs';
 import * as vscode from 'vscode';
-import SidebarMarkdownNotesProvider from './webviewProvider';
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
+import { ClaudeSessionIndex, defaultClaudeConfigDir } from './claudeSessions';
+import { expandHome, isInside } from './notePaths';
+import { NotesController } from './notesController';
+import { NoteStore } from './noteStore';
+import { NotesViewProvider } from './notesView';
+import { TargetResolver } from './targets';
+
 export function activate(context: vscode.ExtensionContext) {
-  // Use the console to output diagnostic information (console.log) and errors (console.error)
-  // This line of code will only be executed once when your extension is activated
-
-  const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 1000);
-  context.subscriptions.push(statusBar);
-
-  const provider = new SidebarMarkdownNotesProvider(context.extensionUri, statusBar);
-
-  // register some listener that make sure the status bar
-  // item always up-to-date
-  // context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(provider.updateStatusBar));
-  // context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection(provider.updateStatusBar));
-
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider(SidebarMarkdownNotesProvider.viewId, provider));
-
-  // The command has been defined in the package.json file
-  // Now provide the implementation of the command with registerCommand
-  // The commandId parameter must match the command field in package.json
-  context.subscriptions.push(
-    vscode.commands.registerCommand('sidebar-markdown-notes.togglePreview', () => {
-      // The code you place here will be executed every time your command is executed
-      provider.togglePreview();
-    })
-  );
+  const sessions = new ClaudeSessionIndex(() => {
+    const configured = vscode.workspace.getConfiguration('sidebarFileNotes').get<string>('claudeCode.configDir', '');
+    return configured.trim() ? expandHome(configured.trim()) : defaultClaudeConfigDir();
+  });
+  const resolver = new TargetResolver(sessions, context.globalStorageUri.fsPath);
+  const store = new NoteStore();
+  const view = new NotesViewProvider(context.extensionUri);
+  const controller = new NotesController(resolver, store, view);
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('sidebar-markdown-notes.previousPage', () => {
-      provider.previousPage();
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('sidebar-markdown-notes.nextPage', () => {
-      provider.nextPage();
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('sidebar-markdown-notes.resetData', () => {
-      provider.resetData();
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('sidebar-markdown-notes.exportPage', () => {
-      provider.exportPage();
+    view,
+    controller,
+    vscode.window.registerWebviewViewProvider(NotesViewProvider.viewId, view, {
+      webviewOptions: { retainContextWhenHidden: true }
+    }),
+    vscode.commands.registerCommand('sidebarFileNotes.togglePreview', () => view.togglePreview()),
+    vscode.commands.registerCommand('sidebarFileNotes.lock', () => controller.setLocked(true)),
+    vscode.commands.registerCommand('sidebarFileNotes.unlock', () => controller.setLocked(false)),
+    vscode.commands.registerCommand('sidebarFileNotes.openNoteFile', async () => {
+      const target = controller.currentTarget;
+      if (!target) {
+        return noNote();
+      }
+      await controller.flush();
+      const uri = vscode.Uri.file(target.notePath);
+      try {
+        await fs.stat(target.notePath);
+      } catch {
+        // Notes are only written once they have content; create the file so it can be opened.
+        await vscode.workspace.fs.writeFile(uri, new Uint8Array());
+      }
+      await vscode.window.showTextDocument(uri, { preview: false });
+    }),
+    vscode.commands.registerCommand('sidebarFileNotes.deleteNote', async () => {
+      const target = controller.currentTarget;
+      if (!target) {
+        return noNote();
+      }
+      const answer = await vscode.window.showWarningMessage(
+        `Delete the note of "${target.title}"?`,
+        { modal: true, detail: target.notePath },
+        'Delete'
+      );
+      if (answer === 'Delete') {
+        await controller.deleteCurrent();
+      }
+    }),
+    vscode.commands.registerCommand('sidebarFileNotes.revealNotesFolder', async () => {
+      const root = controller.currentTarget?.root ?? resolver.allRoots()[0];
+      await fs.mkdir(root, { recursive: true });
+      const uri = vscode.Uri.file(root);
+      const inWorkspace = (vscode.workspace.workspaceFolders ?? []).some((f) => isInside(root, f.uri.fsPath));
+      await vscode.commands.executeCommand(inWorkspace ? 'revealInExplorer' : 'revealFileInOS', uri);
     })
   );
 }
 
-// this method is called when your extension is deactivated
 export function deactivate() {}
+
+function noNote() {
+  void vscode.window.showInformationMessage('Open a file or a Claude Code conversation first.');
+}

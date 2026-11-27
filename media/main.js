@@ -1,273 +1,210 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-/* eslint-disable no-undef */
-// @ts-nocheck
+// Runs inside the notes webview. Bundled by webpack into dist/webview.js.
+// The extension owns the notes: it sends `load` with the note of the focused tab, and this script sends
+// `save` with the note's key whenever the text changes, so a late save never lands in another note.
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 
-// This script will be run within the webview itself
-// It cannot access the main VS Code APIs directly.
-(function () {
-  // Gets the vs code api
-  const vscode = acquireVsCodeApi();
+import { toggleTask } from './tasks';
 
-  const log = (message) => vscode.postMessage({ type: 'log', value: message });
+const SAVE_DELAY_MS = 300;
 
-  const updateStatusBar = (message) => vscode.postMessage({ type: 'updateStatusBar', value: message });
-  updateStatusBar('');
+const vscode = acquireVsCodeApi();
 
-  let timeoutId;
-  const updateStatusForSeconds = (message, secondsToHide) => {
-    updateStatusBar(message);
+const elements = {
+  header: document.getElementById('header'),
+  kind: document.getElementById('kind'),
+  title: document.getElementById('title'),
+  lock: document.getElementById('lock'),
+  detail: document.getElementById('detail'),
+  empty: document.getElementById('empty'),
+  render: document.getElementById('render'),
+  content: document.getElementById('content'),
+  input: document.getElementById('text-input')
+};
 
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      timeoutId = undefined;
-    }
+const KIND_LABELS = { file: 'File', claude: 'Claude', 'claude-pending': 'Claude' };
 
-    timeoutId = setTimeout(() => {
-      updateStatusBar('');
-    }, secondsToHide || 3000);
-  };
+/** The note shown: `key` is its file path, undefined when there is no note. */
+let note = { key: undefined, content: '' };
+let mode = (vscode.getState() || {}).mode === 'render' ? 'render' : 'editor';
+let saveTimer;
 
-  const welcomeMessage =
-    '# Welcome to `sidebar-markdown-notes`\n\nStart by typing **markdown**.\n\nClick the `Toggle preview` button to view your notes\n\nAlso works with GitHub Flavored Markdown ✨✨\n- [ ] Start by  \n- [ ] creating your own  \n- [x] checklists!  \n\nOr any kind of markdown\n\n- Your imagination  \n- Is the limit';
-
-  const initialState = {
-    state: 'editor',
-    currentPage: 0,
-    pages: [welcomeMessage],
-    version: 1
-  };
-
-  // Gets the state or creates a new one if it doesn't exist
-  let currentState = vscode.getState() || initialState;
-
-  // Set the options for the maked markdown parser
-  marked.setOptions({
-    gfm: true,
-    breaks: true
-  });
-
-  // Creates custom renderers for the marked markdown
-  const renderer = {
-    // Ref: https://github.com/markedjs/marked/blob/master/src/Renderer.js
-    list(body, ordered, start) {
-      const type = ordered ? 'ol' : 'ul',
-        startatt = ordered && start !== 1 ? ' start="' + start + '"' : '',
-        hasTodo = body.match(/checkbox/i) ? ' class="todoList"' : ''; // If there's a checkbox, adds a "todoList" class
-      return '<' + type + startatt + hasTodo + '>\n' + body + '</' + type + '>\n';
-    },
+marked.use({
+  gfm: true,
+  breaks: true,
+  renderer: {
+    // Clickable checkboxes: the default renderer disables them.
     checkbox(checked) {
-      return '<input ' + (checked ? 'checked="" ' : '') + 'type="checkbox"' + (this.options.xhtml ? ' /' : '') + '> ';
+      return `<input ${checked ? 'checked="" ' : ''}type="checkbox"> `;
+    },
+    list(body, ordered, start) {
+      const type = ordered ? 'ol' : 'ul';
+      const startAttr = ordered && start !== 1 ? ` start="${start}"` : '';
+      const todo = /type="checkbox"/.test(body) ? ' class="todoList"' : '';
+      return `<${type}${startAttr}${todo}>\n${body}</${type}>\n`;
     }
-  };
+  }
+});
 
-  // Use the created renderer
-  marked.use({ renderer });
+// ---- saving -------------------------------------------------------------------------------------------
 
-  // This method will render the webview
-  const renderView = () => {
-    // Grabs the elements
-    const renderElement = document.getElementById('render');
-    const editorElement = document.getElementById('content');
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, SAVE_DELAY_MS);
+}
 
-    // Gets the latest markdown content
-    const content = currentState.pages[currentState.currentPage];
+function saveNow() {
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
+  if (note.key === undefined) {
+    return;
+  }
+  if (mode === 'editor' && elements.input.value !== note.content) {
+    note.content = elements.input.value;
+  }
+  vscode.postMessage({ type: 'save', key: note.key, content: note.content });
+}
 
-    switch (currentState.state) {
-      case 'render': {
-        // If we want to render the markdown
+/** Sends typing that is waiting for the save delay. */
+function flush() {
+  if (saveTimer !== undefined) {
+    saveNow();
+  }
+}
 
-        // Grab the html for the markdown
-        renderElement.innerHTML = DOMPurify.sanitize(marked(content || ''));
+function isDirty() {
+  return (
+    saveTimer !== undefined || (mode === 'editor' && note.key !== undefined && elements.input.value !== note.content)
+  );
+}
 
-        if (renderElement.classList.contains('hidden')) {
-          renderElement.classList.remove('hidden');
-        }
-        editorElement.classList.add('hidden');
+// ---- rendering ----------------------------------------------------------------------------------------
 
-        document.querySelectorAll(`input[type='checkbox']`).forEach((check) => {
-          // So we can lookup the checkbox in the markdown content
-          const content = check.parentElement.textContent.trim();
-          const getIsChecked = () => currentState.pages[currentState.currentPage].includes(`- [x] ${content}`);
+function show(el, visible) {
+  el.classList.toggle('hidden', !visible);
+}
 
-          // Ensure the checkbox state matches what is in the latest markdown
-          check.checked = getIsChecked();
+function renderHeader(meta) {
+  show(elements.header, meta.key !== undefined);
+  elements.kind.textContent = KIND_LABELS[meta.kind] || '';
+  elements.kind.className = `kind-${meta.kind || 'none'}`;
+  elements.title.textContent = meta.title || '';
+  elements.title.title = meta.title || '';
+  elements.detail.textContent = meta.detail || '';
+  elements.detail.title = meta.detail || '';
+}
 
-          check.addEventListener('click', () => {
-            const checked = getIsChecked();
+function renderLock(locked) {
+  show(elements.lock, !!locked);
+}
 
-            // Update the markdown to use the new checked state
-            // Best to just rely on the markdown as the source of truth rather
-            // than trying to juggle some internal state for the checkbox
-            const newPageContent = checked
-              ? // Was checked - should now uncheck
-                currentState.pages[currentState.currentPage].replaceAll(`- [x] ${content}`, `- [ ] ${content}`)
-              : // Was not checked - should now check
-                currentState.pages[currentState.currentPage].replaceAll(`- [ ] ${content}`, `- [x] ${content}`);
-
-            let newState = {
-              ...currentState,
-              pages: [
-                ...currentState.pages.slice(0, currentState.currentPage),
-                newPageContent,
-                ...currentState.pages.slice(currentState.currentPage + 1)
-              ]
-            };
-
-            saveState(newState);
-          });
-        });
-        break;
-      }
-      case 'editor': {
-        // If we want to render the text editor
-
-        // Grabs the text input
-        const editorTextArea = document.getElementById('text-input');
-
-        // Put the value in the input
-        editorTextArea.value = content || '';
-
-        if (editorElement.classList.contains('hidden')) {
-          editorElement.classList.remove('hidden');
-        }
-        renderElement.classList.add('hidden');
-        break;
-      }
+function renderBody() {
+  const hasNote = note.key !== undefined;
+  show(elements.empty, !hasNote);
+  show(elements.render, hasNote && mode === 'render');
+  show(elements.content, hasNote && mode === 'editor');
+  if (!hasNote) {
+    return;
+  }
+  if (mode === 'editor') {
+    if (elements.input.value !== note.content) {
+      elements.input.value = note.content;
     }
-  };
-
-  const saveState = (newState) => {
-    // Save the state
-    vscode.setState(newState);
-    // Updates current instance
-    currentState = newState;
-
-    renderView();
-  };
-
-  const getUpdatedContent = () => {
-    let newState = { ...currentState };
-
-    switch (currentState.state) {
-      case 'render': {
-        break;
-      }
-      case 'editor': {
-        // If the current state is the editor
-
-        // Get the editor text area
-        const editorTextArea = document.getElementById('text-input');
-
-        // Updates the value in state only if they're different
-        if (editorTextArea.value !== newState.pages[newState.currentPage]) {
-          // Make a state with the typed in value
-          newState = {
-            ...newState,
-            pages: [
-              ...newState.pages.slice(0, newState.currentPage),
-              editorTextArea.value,
-              ...newState.pages.slice(newState.currentPage + 1)
-            ]
-          };
-        }
-
-        break;
-      }
-    }
-
-    return newState;
-  };
-
-  const debouncedSaveContent = _.debounce(() => saveState(getUpdatedContent()), 300, {
-    maxWait: 500
-  });
-
-  const togglePreview = () => {
-    // Grabs the new state
-    let newState = { ...getUpdatedContent(), state: currentState.state === 'editor' ? 'render' : 'editor' };
-    saveState(newState);
-  };
-
-  const exportPage = () => {
-    // Update state and get current page's content
-    let newState = getUpdatedContent();
-    saveState(newState);
-    const content = newState.pages[newState.currentPage];
-    // Reply to extension with the text
-    vscode.postMessage({ type: 'exportPage', value: content });
-  };
-
-  const previousPage = () => {
-    if (currentState.currentPage > 0) {
-      let newState = { ...getUpdatedContent(), currentPage: currentState.currentPage - 1 };
-
-      saveState(newState);
-
-      updateStatusForSeconds(`$(file) Page ${newState.currentPage + 1}`);
-    } else {
-      updateStatusForSeconds(`$(file) Page ${currentState.currentPage + 1}`);
-      log(`You're already at the first page`);
-    }
-  };
-
-  const nextPage = () => {
-    if (currentState.currentPage <= 999) {
-      const newPageIndex = Number(currentState.currentPage) + 1;
-
-      let newState = {
-        ...getUpdatedContent(),
-        currentPage: newPageIndex
-      };
-
-      if (!currentState.pages[newPageIndex]) {
-        newState = { ...newState, pages: [...newState.pages, `Page ${newPageIndex + 1}\n${welcomeMessage}`] };
-      }
-
-      saveState(newState);
-
-      updateStatusForSeconds(`$(file) Page ${newPageIndex + 1}`);
-    }
-  };
-
-  // Handle messages sent from the extension to the webview
-  window.addEventListener('message', (event) => {
-    const message = event.data; // The json data that the extension sent
-    switch (message.type) {
-      case 'togglePreview': {
-        // If the editor sends a togglePreview message
-        togglePreview();
-        break;
-      }
-      case 'previousPage': {
-        previousPage();
-        break;
-      }
-      case 'nextPage': {
-        nextPage();
-        break;
-      }
-      case 'resetData': {
-        saveState(initialState);
-        break;
-      }
-      case 'exportPage': {
-        exportPage();
-        break;
-      }
-    }
-  });
-
-  document.getElementById('text-input').addEventListener('keydown', (event) => {
-    if (event.key === 'Tab') {
-      // prevent the focus lose on tab press
+    return;
+  }
+  if (note.content.trim() === '') {
+    elements.render.innerHTML = '<p class="placeholder">No notes yet. Double-click to start writing.</p>';
+    return;
+  }
+  elements.render.innerHTML = DOMPurify.sanitize(marked.parse(note.content));
+  elements.render.querySelectorAll('input[type="checkbox"]').forEach((box, index) => {
+    box.addEventListener('click', (event) => {
       event.preventDefault();
+      note.content = toggleTask(note.content, index);
+      saveNow();
+      renderBody();
+    });
+  });
+}
+
+function setMode(next) {
+  if (mode === 'editor') {
+    note.content = elements.input.value;
+  }
+  mode = next;
+  vscode.setState({ mode });
+  renderBody();
+  if (mode === 'editor' && note.key !== undefined) {
+    elements.input.focus();
+  }
+}
+
+// ---- messages from the extension ----------------------------------------------------------------------
+
+window.addEventListener('message', (event) => {
+  const message = event.data;
+  switch (message.type) {
+    case 'load': {
+      flush();
+      note = { key: message.key, content: message.content || '' };
+      elements.input.placeholder = message.title ? `Notes on ${message.title}…` : '';
+      renderHeader(message);
+      renderLock(message.locked);
+      elements.input.value = note.content;
+      elements.input.setSelectionRange(0, 0);
+      elements.input.scrollTop = 0;
+      elements.render.scrollTop = 0;
+      renderBody();
+      break;
     }
-  });
+    case 'meta': {
+      if (message.key === note.key) {
+        renderHeader(message);
+        elements.input.placeholder = message.title ? `Notes on ${message.title}…` : '';
+      }
+      break;
+    }
+    case 'external': {
+      if (message.key === note.key && !isDirty()) {
+        note.content = message.content;
+        renderBody();
+      }
+      break;
+    }
+    case 'locked':
+      renderLock(message.locked);
+      break;
+    case 'flush':
+      flush();
+      vscode.postMessage({ type: 'flushed', id: message.id });
+      break;
+    case 'togglePreview':
+      setMode(mode === 'editor' ? 'render' : 'editor');
+      break;
+  }
+});
 
-  document.getElementById('text-input').addEventListener('input', () => {
-    debouncedSaveContent();
-  });
+// ---- input --------------------------------------------------------------------------------------------
 
-  // Runs the render for the first time
-  renderView();
-})();
+elements.input.addEventListener('input', scheduleSave);
+elements.input.addEventListener('blur', flush);
+window.addEventListener('blur', flush);
+window.addEventListener('pagehide', flush);
+
+elements.input.addEventListener('keydown', (event) => {
+  if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    // Indent instead of moving focus; execCommand keeps the edit on the undo stack.
+    event.preventDefault();
+    document.execCommand('insertText', false, '  ');
+  }
+});
+
+elements.render.addEventListener('dblclick', (event) => {
+  if (event.target instanceof Element && event.target.closest('a, input')) {
+    return;
+  }
+  setMode('editor');
+});
+
+renderBody();
+vscode.postMessage({ type: 'ready' });

@@ -1,3 +1,108 @@
+html,
+body {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+body > * {
+  margin: 0;
+}
+
+body.left-margin #header,
+body.left-margin #render,
+body.left-margin #content,
+body.left-margin #empty {
+  padding-left: 20px;
+}
+
+#header {
+  flex: none;
+  padding: 6px 8px 6px 4px;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border, transparent));
+}
+
+#title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+#kind,
+#lock {
+  flex: none;
+  font-size: 10px;
+  line-height: 14px;
+  padding: 0 5px;
+  border-radius: 7px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+}
+
+#kind.kind-claude,
+#kind.kind-claude-pending {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+#kind.kind-claude-pending {
+  opacity: 0.7;
+}
+
+#lock {
+  background: var(--vscode-inputValidation-warningBackground, var(--vscode-badge-background));
+  color: var(--vscode-foreground);
+}
+
+#title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#detail {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#main {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+}
+
+#content,
+#render,
+#empty {
+  position: absolute;
+  inset: 0;
+}
+
+#render {
+  overflow: auto;
+  padding: 4px 8px 16px 4px;
+}
+
+#empty {
+  padding: 12px 8px;
+  color: var(--vscode-descriptionForeground);
+}
+
 #text-input {
   height: 100%;
   resize: none;
@@ -5,10 +110,9 @@
   white-space: break-spaces;
 }
 
-html,
-body {
-  height: 100%;
-  width: 100%;
+.placeholder {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
 }
 
 .todoList {
@@ -19,13 +123,4 @@ body {
 
 .hidden {
   display: none !important;
-}
-
-#content,
-#render {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  left: 0;
 }

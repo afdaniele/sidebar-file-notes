@@ -1,1 +1,3 @@
-media/lib/codemirror
+dist
+out
+node_modules
