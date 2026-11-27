@@ -1,12 +1,13 @@
 import { promises as fs } from 'fs';
 import * as vscode from 'vscode';
 
+import { conversationSelectionBlock, editorSelectionBlocks } from './capture';
 import { ClaudeSessionIndex, defaultClaudeConfigDir } from './claudeSessions';
 import { expandHome, isInside } from './notePaths';
 import { NotesController } from './notesController';
 import { NoteStore } from './noteStore';
 import { NotesViewProvider } from './notesView';
-import { TargetResolver } from './targets';
+import { isClaudeTab, TargetResolver } from './targets';
 
 export function activate(context: vscode.ExtensionContext) {
   const sessions = new ClaudeSessionIndex(() => {
@@ -55,6 +56,27 @@ export function activate(context: vscode.ExtensionContext) {
       if (answer === 'Delete') {
         await controller.deleteCurrent();
       }
+    }),
+    vscode.commands.registerCommand('sidebarFileNotes.addSelection', async () => {
+      const activeTab = vscode.window.tabGroups.activeTabGroup.activeTab;
+      let blocks: string[];
+      if (activeTab && isClaudeTab(activeTab)) {
+        const block = await conversationSelectionBlock();
+        blocks = block ? [block] : [];
+      } else if (vscode.window.activeTextEditor) {
+        blocks = editorSelectionBlocks(vscode.window.activeTextEditor);
+      } else {
+        blocks = [];
+      }
+      if (blocks.length === 0) {
+        void vscode.window.showInformationMessage('Select text in a Claude Code conversation or in an editor first.');
+        return;
+      }
+      const target = await controller.append(blocks.join('\n\n'));
+      if (!target) {
+        return noNote();
+      }
+      vscode.window.setStatusBarMessage(`$(note) Added to the note of ${target.title}`, 3000);
     }),
     vscode.commands.registerCommand('sidebarFileNotes.revealNotesFolder', async () => {
       const root = controller.currentTarget?.root ?? resolver.allRoots()[0];

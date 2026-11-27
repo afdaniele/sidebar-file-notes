@@ -77,6 +77,12 @@
         "icon": "$(go-to-file)"
       },
       {
+        "command": "sidebarFileNotes.addSelection",
+        "category": "Sidebar File Notes",
+        "title": "Add Selection to Note",
+        "icon": "$(note)"
+      },
+      {
         "command": "sidebarFileNotes.deleteNote",
         "category": "Sidebar File Notes",
         "title": "Delete Current Note",
@@ -120,8 +126,30 @@
           "group": "more@1",
           "when": "view == sidebarFileNotes.view"
         }
+      ],
+      "webview/context": [
+        {
+          "command": "sidebarFileNotes.addSelection",
+          "group": "navigation",
+          "when": "webviewId =~ /claudeVSCodePanel/"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "sidebarFileNotes.addSelection",
+          "group": "9_cutcopypaste@9",
+          "when": "editorHasSelection && resourceScheme == file"
+        }
       ]
     },
+    "keybindings": [
+      {
+        "command": "sidebarFileNotes.addSelection",
+        "key": "alt+n",
+        "mac": "cmd+alt+n",
+        "when": "editorTextFocus && editorHasSelection || activeWebviewPanelId =~ /claudeVSCodePanel/ && !editorTextFocus && !terminalFocus && !focusedView"
+      }
+    ],
     "configuration": [
       {
         "title": "Sidebar File Notes",

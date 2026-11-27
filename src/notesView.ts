@@ -82,6 +82,18 @@ export class NotesViewProvider implements vscode.WebviewViewProvider, vscode.Dis
     this.post({ type: 'external', key, content });
   }
 
+  /**
+   * Asks the webview to append a block to the note it shows and save it. Returns false when the webview
+   * is not ready, in which case the caller writes the note file itself.
+   */
+  append(key: string, block: string): boolean {
+    if (!this.view || !this.ready || this.state.target?.notePath !== key) {
+      return false;
+    }
+    this.post({ type: 'append', key, block });
+    return true;
+  }
+
   setLocked(locked: boolean): void {
     this.state = { ...this.state, locked };
     this.post({ type: 'locked', locked });
