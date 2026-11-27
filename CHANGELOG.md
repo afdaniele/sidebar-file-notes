@@ -1,9 +1,22 @@
 
-# Release Notes for sidebar-markdown-notes
+# Release Notes
 
-## not-yet-published
+## 2.0.0 (Sidebar File Notes)
 
-- Marvelous features to come
+Forked from sidebar-markdown-notes and reworked around per-target notes.
+
+- Each file has its own note; the view follows the active editor tab.
+- Each Claude Code conversation tab has its own note, keyed by session id.
+- Notes are stored as markdown files (setting `sidebarFileNotes.notesDirectory`, default `.notes`).
+- Lock a note to stop following the active tab.
+- Open the note file in an editor, delete a note, reveal the notes folder.
+- Notes follow files and folders renamed inside VS Code.
+- Checkboxes toggle by position, so duplicate task text works.
+- Tab indents in the editor.
+- Removed the multiple pages feature, the status bar item and the reset/export commands.
+- Updated marked and DOMPurify; requires VS Code 1.75 or newer.
+
+## Previous releases (sidebar-markdown-notes)
 
 ## 1.0.4
 
