@@ -171,6 +171,22 @@ window.addEventListener('message', (event) => {
       }
       break;
     }
+    case 'append': {
+      // Captured text: appended to what is shown, unsaved typing included, then saved right away.
+      if (message.key !== note.key) {
+        break;
+      }
+      const current = mode === 'editor' ? elements.input.value : note.content;
+      // Same as appendBlock() in src/snippets.ts.
+      const head = current.replace(/\s+$/, '');
+      note.content = head === '' ? `${message.block}\n` : `${head}\n\n${message.block}\n`;
+      elements.input.value = note.content;
+      saveNow();
+      renderBody();
+      elements.input.scrollTop = elements.input.scrollHeight;
+      elements.render.scrollTop = elements.render.scrollHeight;
+      break;
+    }
     case 'locked':
       renderLock(message.locked);
       break;

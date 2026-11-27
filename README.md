@@ -16,6 +16,9 @@ A fork of [sidebar-markdown-notes](https://github.com/AssisrMatheus/sidebar-mark
 - Markdown preview with GitHub Flavored Markdown and clickable task-list checkboxes.
 - Notes are plain `.md` files: open one in an editor (go-to-file icon), grep them, commit them or ignore them.
 - Notes follow files and folders renamed or moved inside VS Code.
+- **Add a selection to the note**: select text in a Claude Code conversation (or in a file) and press
+  `Alt+N` (`Cmd+Alt+N` on macOS), or right-click and pick **Add Selection to Note**. Conversation text is
+  added as a quote; file text as a code block under its `path:line` reference.
 
 ## Where notes are stored
 
@@ -50,6 +53,10 @@ Things to know:
   `claude/.pending/` and moved into the session's note once the title appears.
 - If two open conversations have exactly the same title, the second one gets the next-newest matching
   session; renaming one of them tells them apart.
+- **Add Selection to Note** in a conversation reads the selection through the clipboard (Claude Code does not
+  expose it otherwise): it runs Copy in the conversation, takes the text, then puts your clipboard text back.
+  Formatting of the copied text (code blocks, lists) comes through as plain lines, and a clipboard holding an
+  image or rich text comes back as plain text only.
 - This relies on undocumented details of Claude Code (the tab's webview type and the transcript format), so
   a Claude Code update could break it. File notes are unaffected.
 
@@ -66,6 +73,8 @@ Things to know:
 
 - **Toggle Preview**: switch between editing and the rendered markdown (double-click the preview to edit).
 - **Lock to Current Note** / **Unlock**: stop or resume following the active tab.
+- **Add Selection to Note** (`Alt+N`, `Cmd+Alt+N` on macOS): append the selection of the focused Claude Code
+  conversation or editor to the current note.
 - **Open Note File in Editor**
 - **Delete Current Note**
 - **Reveal Notes Folder**

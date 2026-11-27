@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { folderNotesPath, isInside } from './notePaths';
 import { NoteStore } from './noteStore';
 import { NotesViewProvider, SaveRequest } from './notesView';
+import { appendBlock } from './snippets';
 import { NoteTarget, TargetResolver } from './targets';
 
 const REFRESH_DELAY_MS = 50;
@@ -68,6 +69,32 @@ export class NotesController implements vscode.Disposable {
     if (this.current) {
       await this.store.idle(this.current.notePath);
     }
+  }
+
+  /**
+   * Appends a markdown block to the current note and returns that note, or undefined when there is none.
+   * Queued behind any note switch in progress, so it lands in the note the view ends up showing.
+   */
+  append(block: string): Promise<NoteTarget | undefined> {
+    const run = async () => {
+      const target = this.current;
+      if (!target) {
+        return undefined;
+      }
+      // The webview appends to what it shows, unsaved typing included, and saves the result.
+      if (!this.view.append(target.notePath, block)) {
+        const content = appendBlock(await this.store.read(target.notePath), block);
+        await this.store.write(target.notePath, content);
+        this.view.externalChange(target.notePath, content);
+      }
+      return target;
+    };
+    const result = this.switching.then(run, run);
+    this.switching = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
   }
 
   async deleteCurrent(): Promise<void> {

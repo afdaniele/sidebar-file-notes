@@ -23,7 +23,7 @@ Repository: https://github.com/afdaniele/sidebar-file-notes. Publisher id in `pa
 
 ## Status (as of 2026-11-27)
 
-- Implemented, unit tested (18 mocha tests), lint clean, packaged as `sidebar-file-notes-2.0.0.vsix`, and
+- Implemented, unit tested (22 mocha tests), lint clean, packaged as `sidebar-file-notes-2.0.0.vsix`, and
   installed locally by the owner.
 - **Not yet exercised in a live VS Code window by an agent.** Tab following, the file watcher, the
   webview and Claude tab detection are typechecked but only the pure modules have tests. Expect bugs there
@@ -63,14 +63,16 @@ src/
   notePaths.ts        where note files live (no vscode import)
   noteStore.ts        serialized reads/writes/merges/renames of note files (no vscode import)
   notesView.ts        NotesViewProvider: the webview view, its HTML and the message protocol
-  test/*.test.ts      mocha unit tests for the three pure modules and media/tasks.js
+  capture.ts          reads the selection of the focused Claude conversation (via the clipboard) or text editor
+  snippets.ts         formats captured text as markdown (quote, fenced code block), appendBlock (no vscode import)
+  test/*.test.ts      mocha unit tests for the pure modules and media/tasks.js
 media/
   main.js             webview script (ES module, bundled by webpack into dist/webview.js)
   tasks.js            toggleTask(): flip the n-th markdown task checkbox (CommonJS so tests can require it)
   main.css, markdown.css, vscode.css, reset.css
 ```
 
-`claudeSessions.ts`, `notePaths.ts` and `noteStore.ts` must not import `vscode`, so they stay testable with
+`claudeSessions.ts`, `notePaths.ts`, `noteStore.ts` and `snippets.ts` must not import `vscode`, so they stay testable with
 plain mocha. Put new logic that can be pure in modules like these, and add tests.
 
 ## Architecture and data flow
@@ -105,6 +107,7 @@ plain mocha. Put new logic that can be pure in modules like these, and add tests
 
 Host -> webview: `load {key, kind, title, detail, content, locked}`, `meta {key, kind, title, detail}`,
 `external {key, content}` (file changed on disk; applied only if the webview has no unsaved typing),
+`append {key, block}` (captured text: appended to what the webview shows, unsaved typing included, then saved),
 `locked {locked}`, `flush {id}`, `togglePreview`.
 
 Webview -> host: `ready` (host replies with `load` of the current state), `save {key, content}`,
@@ -212,6 +215,26 @@ Subagent transcripts live in subfolders and are not scanned (only top-level `*.j
   discarded refresh cannot lose it.
 - `unsettled` targets (pending, or kept-after-mismatch) are re-resolved every 3 s while focused.
 
+### Capturing a conversation selection (`capture.ts`)
+
+Command `sidebarFileNotes.addSelection`. The conversation webview's DOM and selection are not reachable from
+another extension, but VS Code (1.146 workbench, `webview.contribution`) overrides
+`editor.action.clipboardCopyAction` to call `copy()` on the focused webview, also when run from a context
+menu item. So: save the clipboard text, write a random marker, run Copy, poll the clipboard (750 ms) until it
+differs from the marker, restore the saved text. If nothing changed, it runs
+`workbench.action.focusActiveEditorGroup` (the webview keeps its selection) and tries once more. Unchanged
+clipboard = nothing selected. Non-text clipboard contents are lost (restored as text only).
+
+- Entry points: `webview/context` menu with `webviewId =~ /claudeVSCodePanel/` (Claude Code does not block
+  the context menu nor set `preventDefaultContextMenuItems`), `editor/context`, and keybinding `alt+n`
+  (`cmd+alt+n` on macOS) gated on `activeWebviewPanelId =~ /claudeVSCodePanel/ && !focusedView ...`.
+  Both context keys hold the unprefixed view type (`providedViewType`).
+- If the active tab is a Claude tab it captures from the webview, else from `activeTextEditor`
+  (code block under `path:line`). `NotesController.append` runs in the `switching` chain; the view appends
+  (`append` message) or, if the webview is not resolved, the controller writes the file.
+- Not yet verified live: the focus timing of the context-menu path, and whether copy from Claude's
+  rendered markdown gives sensible plain text.
+
 ### Re-verifying after a Claude Code update
 
 If conversation notes stop working, check these in the installed extension
@@ -223,6 +246,7 @@ grep -oE 'createWebviewPanel\("[a-zA-Z]+"' "$E" | sort -u        # panel viewTyp
 grep -oE 'function Ppe\(e\)\{.{0,120}' "$E"                       # tab title truncation, placeholder
 grep -oE '"custom-title":"customTitle","ai-title":"aiTitle"' "$E" # title record names
 grep -h '"type":"ai-title"' ~/.claude/projects/*/*.jsonl | head -3  # transcript record shape
+grep -c 'preventDefaultContextMenuItems\|data-vscode-context' "$(dirname "$E")/webview/index.js"  # 0: our context menu item still shows
 ```
 
 Then a quick end-to-end check of matching against real transcripts:
@@ -240,7 +264,8 @@ Settings (`sidebarFileNotes.*`): `notesDirectory` (`.notes`), `claudeCode.enable
 
 Commands: `togglePreview`, `lock` / `unlock` (context key `sidebarFileNotes.locked` swaps the title-bar icon),
 `openNoteFile`, `deleteNote` (modal confirm), `revealNotesFolder`. All are in the view title bar (`navigation`
-group) or its `…` menu (`more` group).
+group) or its `…` menu (`more` group). `addSelection` is in the Claude conversation and editor context
+menus and bound to `alt+n` / `cmd+alt+n`.
 
 ## Webview details
 

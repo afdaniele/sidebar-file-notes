@@ -1,6 +1,12 @@
 
 # Release Notes
 
+## Unreleased
+
+- **Add Selection to Note** (`Alt+N`, also in the right-click menu of Claude Code conversations and editors):
+  appends the selected conversation text as a quote, or the selected file text as a code block with its
+  `path:line` reference.
+
 ## 2.0.0 (Sidebar File Notes)
 
 Forked from sidebar-markdown-notes and reworked around per-target notes.
