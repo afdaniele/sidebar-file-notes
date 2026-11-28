@@ -158,6 +158,25 @@ export class ClaudeSessionIndex {
     return undefined;
   }
 
+  /** Info of a session by id, also when it was never seen: its transcript is looked up by file name. */
+  async lookup(sessionId: string, projectPaths: string[]): Promise<SessionInfo | undefined> {
+    const known = await this.get(sessionId);
+    if (known || !/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+      return known;
+    }
+    const projectsDir = this.projectsDir;
+    const preferred = projectPaths.map((p) => path.join(projectsDir, projectDirName(p)));
+    const dirs = [...new Set([...preferred, ...(await listSubdirs(projectsDir))])];
+    for (const dir of dirs) {
+      const file = path.join(dir, `${sessionId}.jsonl`);
+      const stat = await statOrUndefined(file);
+      if (stat?.isFile()) {
+        return toInfo(await this.update(file, stat));
+      }
+    }
+    return undefined;
+  }
+
   private async scanDirs(dirs: string[], minMtimeMs?: number): Promise<SessionInfo[]> {
     const sessions: SessionInfo[] = [];
     for (const dir of dirs) {

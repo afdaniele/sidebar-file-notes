@@ -3,6 +3,16 @@
 
 ## Unreleased
 
+- **Pages.** Each note is now a tree of pages, one per turn: **Mark sent** freezes the page and starts the next
+  draft; **Fork** and **Split…** add sibling branches; forks can be handed off to a new Claude Code
+  conversation, which links back to them. A graph at the top of the view shows the pages; buttons, the graph
+  and new commands move between them. Sent pages are read-only unless you choose **Edit anyway**.
+- **Add Selection to New Fork** (`Shift+Alt+N`, `Shift+Cmd+Alt+N` on macOS, also in the right-click menus):
+  the selection becomes a new fork next to the page shown, and the view stays on that page.
+- **Breaking: new storage layout.** A note is now a folder with one markdown file per page
+  (`files/<path>.pages/`, `claude/<session-id>/`). Notes stored as single `.md` files by earlier versions are
+  not read anymore (they stay on disk).
+
 - **Add Selection to Note** (`Alt+N`, also in the right-click menu of Claude Code conversations and editors):
   appends the selected conversation text as a quote, or the selected file text as a code block with its
   `path:line` reference.
