@@ -15,12 +15,13 @@ import {
   sessionScore
 } from './claudeSessions';
 import {
-  claudeNotePath,
-  externalNotePath,
-  fileNotePath,
+  claudeNoteDir,
+  externalNoteDir,
+  FILE_NOTE_SUFFIX,
+  fileNoteDir,
   isInside,
   notesRootFor,
-  pendingClaudeNotePath
+  pendingClaudeNoteDir
 } from './notePaths';
 
 /** Claude Code conversation panels are webviews of this type (VS Code may prefix it). */
@@ -33,8 +34,8 @@ export type NoteKind = 'file' | 'claude' | 'claude-pending';
 
 export interface NoteTarget {
   kind: NoteKind;
-  /** Absolute path of the note file; also the note's identity. */
-  notePath: string;
+  /** Absolute path of the note's folder (one file per page); also the note's identity. */
+  noteDir: string;
   /** Notes root the note belongs to. */
   root: string;
   /** Short name of what the note is about. */
@@ -88,7 +89,7 @@ export class TargetResolver {
       const multiRoot = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
       return {
         kind: 'file',
-        notePath: fileNotePath(root, rel),
+        noteDir: fileNoteDir(root, rel),
         root,
         title: path.basename(fsPath),
         detail: multiRoot ? `${folder.name}/${rel.split(path.sep).join('/')}` : rel.split(path.sep).join('/')
@@ -97,11 +98,56 @@ export class TargetResolver {
     const root = this.defaultRoot();
     return {
       kind: 'file',
-      notePath: externalNotePath(root, fsPath),
+      noteDir: externalNoteDir(root, fsPath),
       root,
       title: path.basename(fsPath),
       detail: fsPath
     };
+  }
+
+  /**
+   * The target of a note folder, e.g. one a handoff link points to. Undefined when the folder is not
+   * under a notes root in use.
+   */
+  async forNoteDir(noteDir: string): Promise<NoteTarget | undefined> {
+    const root = this.allRoots().find((r) => isInside(noteDir, r) && noteDir !== r);
+    if (!root) {
+      return undefined;
+    }
+    const parts = path.relative(root, noteDir).split(path.sep);
+    if (parts[0] === 'claude' && parts[1] === '.pending' && parts.length === 3) {
+      return {
+        kind: 'claude-pending',
+        noteDir,
+        root,
+        title: 'New Claude Code conversation',
+        detail: 'A conversation not identified yet',
+        unsettled: false
+      };
+    }
+    if (parts[0] === 'claude' && parts.length === 2) {
+      const projectPaths = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+      const info = await this.sessions.lookup(parts[1], projectPaths);
+      return {
+        kind: 'claude',
+        noteDir,
+        root,
+        title: (info && displayTitle(info)) || 'Claude Code conversation',
+        detail: `Claude Code conversation · ${parts[1].slice(0, 8)}`
+      };
+    }
+    const last = parts[parts.length - 1];
+    if (parts[0] === 'files' && parts.length >= 2 && last.endsWith(FILE_NOTE_SUFFIX)) {
+      const folder = (vscode.workspace.workspaceFolders ?? []).find((f) => this.rootFor(f) === root);
+      if (folder) {
+        const rel = [...parts.slice(1, -1), last.slice(0, -FILE_NOTE_SUFFIX.length)];
+        return this.forUri(vscode.Uri.file(path.join(folder.uri.fsPath, ...rel)));
+      }
+    }
+    if (parts[0] === 'external' && parts.length === 2 && last.endsWith(FILE_NOTE_SUFFIX)) {
+      return { kind: 'file', noteDir, root, title: 'File outside the workspace', detail: noteDir };
+    }
+    return undefined;
   }
 
   /** Forgets the pending note of a tab once it was merged into the session note. */
@@ -144,13 +190,13 @@ export class TargetResolver {
       const root = this.rootForTranscript(session.file);
       return {
         kind: 'claude',
-        notePath: claudeNotePath(root, session.sessionId),
+        noteDir: claudeNoteDir(root, session.sessionId),
         root,
         title: displayTitle(session) || label,
         detail: `Claude Code conversation · ${session.sessionId.slice(0, 8)}`,
         tab,
         unsettled,
-        migrateFrom: pendingId ? pendingClaudeNotePath(this.defaultRoot(), pendingId) : undefined
+        migrateFrom: pendingId ? pendingClaudeNoteDir(this.defaultRoot(), pendingId) : undefined
       };
     }
 
@@ -159,7 +205,7 @@ export class TargetResolver {
     const root = this.defaultRoot();
     return {
       kind: 'claude-pending',
-      notePath: pendingClaudeNotePath(root, id),
+      noteDir: pendingClaudeNoteDir(root, id),
       root,
       title: label,
       detail: 'New Claude Code conversation · the note moves to the session once it has a title',

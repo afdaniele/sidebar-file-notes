@@ -124,4 +124,13 @@ describe('ClaudeSessionIndex', () => {
     assert.strictEqual((await index.find('Elsewhere', { projectPaths: [workspace] }))?.sessionId, 'dddd');
     assert.strictEqual(await index.find('Claude Code', { projectPaths: [workspace] }), undefined);
   });
+  it('looks a session up by id, in any project, without a prior search', async () => {
+    const otherDir = path.join(configDir, 'projects', projectDirName('/somewhere/else'));
+    await fs.mkdir(otherDir, { recursive: true });
+    await fs.writeFile(transcript(otherDir, 'ffff'), line({ type: 'custom-title', customTitle: 'Linked' }));
+    const index = new ClaudeSessionIndex(() => configDir);
+    assert.strictEqual((await index.lookup('ffff', [workspace]))?.customTitle, 'Linked');
+    assert.strictEqual(await index.lookup('missing', [workspace]), undefined);
+    assert.strictEqual(await index.lookup('../x', [workspace]), undefined);
+  });
 });

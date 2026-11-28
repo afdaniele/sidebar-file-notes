@@ -15,6 +15,7 @@ body > * {
 }
 
 body.left-margin #header,
+body.left-margin #pages,
 body.left-margin #render,
 body.left-margin #content,
 body.left-margin #empty {
@@ -78,6 +79,203 @@ body.left-margin #empty {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---- pages: graph, page bar, actions ---- */
+
+#pages {
+  flex: none;
+  padding: 4px 8px 4px 4px;
+  border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border, transparent));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#graph-wrap {
+  overflow: auto;
+  max-height: 144px;
+  outline: none;
+}
+
+#graph-wrap:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+#graph {
+  display: block;
+}
+
+#graph .edge {
+  fill: none;
+  stroke: var(--vscode-descriptionForeground);
+  stroke-width: 2;
+  opacity: 0.6;
+}
+
+#graph .node,
+#graph .fold {
+  cursor: pointer;
+}
+
+#graph .dot {
+  stroke-width: 2;
+  stroke: var(--vscode-button-background);
+  fill: var(--vscode-sideBar-background, var(--vscode-editor-background));
+}
+
+#graph .state-sent .dot {
+  fill: var(--vscode-button-background);
+}
+
+#graph .state-handed-off .dot {
+  stroke: var(--vscode-charts-purple, var(--vscode-button-background));
+  fill: var(--vscode-charts-purple, var(--vscode-button-background));
+}
+
+#graph .state-dropped .dot {
+  stroke: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+  fill: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  opacity: 0.6;
+}
+
+#graph .virtual .dot {
+  stroke-dasharray: 3 3;
+}
+
+#graph .ring {
+  fill: none;
+  stroke: var(--vscode-focusBorder, var(--vscode-button-background));
+  stroke-width: 2;
+}
+
+#graph .node:hover .dot {
+  stroke-width: 3;
+}
+
+#graph .fold rect {
+  fill: var(--vscode-badge-background);
+}
+
+#graph .fold text {
+  fill: var(--vscode-badge-foreground);
+  font-size: 11px;
+  text-anchor: middle;
+}
+
+#page-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+#page-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#pages button {
+  width: auto;
+  outline-offset: 0 !important;
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--vscode-foreground);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+#pages button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+#pages button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+#pages button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+#pages button.icon {
+  flex: none;
+  width: 20px;
+  padding: 0;
+  font-size: 10px;
+}
+
+#page-actions,
+#handoffs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+#page-actions:empty {
+  display: none;
+}
+
+#pages button.action {
+  padding: 0 6px;
+  border-color: var(--vscode-button-border, var(--vscode-panel-border, rgba(128, 128, 128, 0.35)));
+}
+
+#pages button.action.primary {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border-color: var(--vscode-button-background);
+}
+
+#pages button.action.primary:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+#page-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-size: 11px;
+}
+
+#pages button.link {
+  padding: 0;
+  color: var(--vscode-textLink-foreground);
+  text-align: left;
+}
+
+#pages button.link:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.waiting {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+}
+
+#handoffs {
+  padding: 6px;
+  border-radius: 3px;
+  background: var(--vscode-textBlockQuote-background, rgba(128, 128, 128, 0.1));
+  font-size: 11px;
+}
+
+#handoffs > div {
+  width: 100%;
+}
+
+#content.read-only #text-input {
+  opacity: 0.85;
 }
 
 #main {

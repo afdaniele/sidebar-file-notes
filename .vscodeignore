@@ -14,4 +14,7 @@ tsconfig.json
 webpack.config.js
 images/demo.gif
 media/tasks.js
+media/graph.js
 CLAUDE.md
+.notes/**
+.claude/**

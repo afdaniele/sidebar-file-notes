@@ -83,9 +83,75 @@
         "icon": "$(note)"
       },
       {
+        "command": "sidebarFileNotes.addSelectionToNewFork",
+        "category": "Sidebar File Notes",
+        "title": "Add Selection to New Fork",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "sidebarFileNotes.markSent",
+        "category": "Sidebar File Notes",
+        "title": "Mark Page Sent and Start the Next One"
+      },
+      {
+        "command": "sidebarFileNotes.undoSent",
+        "category": "Sidebar File Notes",
+        "title": "Undo Mark Sent"
+      },
+      {
+        "command": "sidebarFileNotes.fork",
+        "category": "Sidebar File Notes",
+        "title": "Fork from the Latest Sent Page"
+      },
+      {
+        "command": "sidebarFileNotes.splitIntoForks",
+        "category": "Sidebar File Notes",
+        "title": "Split Draft into Forks…"
+      },
+      {
+        "command": "sidebarFileNotes.handOff",
+        "category": "Sidebar File Notes",
+        "title": "Hand Off Fork to a New Conversation"
+      },
+      {
+        "command": "sidebarFileNotes.copyPage",
+        "category": "Sidebar File Notes",
+        "title": "Copy Page"
+      },
+      {
+        "command": "sidebarFileNotes.deletePage",
+        "category": "Sidebar File Notes",
+        "title": "Delete Page…"
+      },
+      {
+        "command": "sidebarFileNotes.previousTurn",
+        "category": "Sidebar File Notes",
+        "title": "Go to Previous Turn"
+      },
+      {
+        "command": "sidebarFileNotes.nextTurn",
+        "category": "Sidebar File Notes",
+        "title": "Go to Next Turn"
+      },
+      {
+        "command": "sidebarFileNotes.previousSibling",
+        "category": "Sidebar File Notes",
+        "title": "Go to Previous Sibling Page"
+      },
+      {
+        "command": "sidebarFileNotes.nextSibling",
+        "category": "Sidebar File Notes",
+        "title": "Go to Next Sibling Page"
+      },
+      {
+        "command": "sidebarFileNotes.goToDraft",
+        "category": "Sidebar File Notes",
+        "title": "Go to Current Draft"
+      },
+      {
         "command": "sidebarFileNotes.deleteNote",
         "category": "Sidebar File Notes",
-        "title": "Delete Current Note",
+        "title": "Delete All Pages of This Note…",
         "icon": "$(trash)"
       },
       {
@@ -132,12 +198,22 @@
           "command": "sidebarFileNotes.addSelection",
           "group": "navigation",
           "when": "webviewId =~ /claudeVSCodePanel/"
+        },
+        {
+          "command": "sidebarFileNotes.addSelectionToNewFork",
+          "group": "navigation",
+          "when": "webviewId =~ /claudeVSCodePanel/"
         }
       ],
       "editor/context": [
         {
           "command": "sidebarFileNotes.addSelection",
           "group": "9_cutcopypaste@9",
+          "when": "editorHasSelection && resourceScheme == file"
+        },
+        {
+          "command": "sidebarFileNotes.addSelectionToNewFork",
+          "group": "9_cutcopypaste@10",
           "when": "editorHasSelection && resourceScheme == file"
         }
       ]
@@ -147,6 +223,12 @@
         "command": "sidebarFileNotes.addSelection",
         "key": "alt+n",
         "mac": "cmd+alt+n",
+        "when": "editorTextFocus && editorHasSelection || activeWebviewPanelId =~ /claudeVSCodePanel/ && !editorTextFocus && !terminalFocus && !focusedView"
+      },
+      {
+        "command": "sidebarFileNotes.addSelectionToNewFork",
+        "key": "shift+alt+n",
+        "mac": "shift+cmd+alt+n",
         "when": "editorTextFocus && editorHasSelection || activeWebviewPanelId =~ /claudeVSCodePanel/ && !editorTextFocus && !terminalFocus && !focusedView"
       }
     ],

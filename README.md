@@ -18,7 +18,36 @@ A fork of [sidebar-markdown-notes](https://github.com/AssisrMatheus/sidebar-mark
 - Notes follow files and folders renamed or moved inside VS Code.
 - **Add a selection to the note**: select text in a Claude Code conversation (or in a file) and press
   `Alt+N` (`Cmd+Alt+N` on macOS), or right-click and pick **Add Selection to Note**. Conversation text is
-  added as a quote; file text as a code block under its `path:line` reference.
+  added as a quote; file text as a code block under its `path:line` reference. It goes to the page shown if
+  that page is a draft, otherwise to the current draft.
+- **Add a selection to a new fork**: `Shift+Alt+N` (`Shift+Cmd+Alt+N` on macOS), or **Add Selection to New
+  Fork** in the right-click menu. The selection becomes a new fork next to the page shown (next to the current
+  draft if the page shown cannot be forked from), and the view stays where it is: park a side topic while
+  you keep reading.
+- **Pages, one per turn**, shown as a graph at the top of the view (see below).
+
+## Pages: a history of your prompts, with forks
+
+Each note is a sequence of pages. The intended use: draft your next prompt in the current page while you
+read Claude's reply, paste it into the conversation, then press **Mark sent** (**Freeze** for file notes).
+The page becomes read-only and a new empty draft follows it, so the note keeps a linear history of what you
+sent.
+
+When the conversation raises side threads, press **Fork**: it adds a sibling of the current draft in a lane
+of its own. **Split…** does it in one go: each top-level list item (or top-level section) of the draft that
+you pick becomes a fork. A fork can be:
+
+- **handed off**: copied to the clipboard to start a new conversation. Open a new Claude Code
+  conversation tab and its note offers **Start this conversation from a handoff**; its first page is
+  then the handoff, and the two pages link to each other (click the link to see the other note);
+- **dropped**, **reopened**, copied **to the draft**, or deleted.
+
+The graph shows the turns from left to right (the main line on top, forks in lanes below). Click a page to
+open it. ◀ ▶ go to the previous and next turn, ▲ ▼ to the sibling pages, ⇥ to the current draft. With the
+graph focused, the arrow keys do the same. Long runs of sent pages fold into a numbered bubble; click it to
+expand. **Edit anyway** unlocks a sent page until you leave it; **Undo sent** turns the latest sent page back
+into a draft while nothing was written after it. Deleting a page always asks first, and for a page with pages
+after it, whether to delete them too or attach them to its parent.
 
 ## Where notes are stored
 
@@ -26,16 +55,29 @@ By default in a `.notes` folder in each workspace folder:
 
 ```
 .notes/
-  files/src/extension.ts.md        note of src/extension.ts
-  external/-etc-hosts.md           note of a file outside the workspace
-  claude/<session-id>.md           note of a Claude Code conversation
-  claude/.pending/<id>.md          note of a conversation that has no title yet (see below)
+  files/src/extension.ts.pages/    note of src/extension.ts
+  external/-etc-hosts.pages/       note of a file outside the workspace
+  claude/<session-id>/             note of a Claude Code conversation
+  claude/.pending/<id>/            note of a conversation that has no title yet (see below)
+```
+
+Each note folder holds one markdown file per page, named by its creation time. A page file starts with a
+short header that places it in the note:
+
+```markdown
+---
+parent: 20261127-143200-a1b2c3
+state: sent
+created: 2026-11-27T14:32:00.000Z
+sentAt: 2026-11-27T14:40:12.000Z
+---
+The prompt, as markdown.
 ```
 
 Add `.notes/` to your `.gitignore` if the notes are personal, or set `sidebarFileNotes.notesDirectory` to
 an absolute path such as `~/notes` to keep them out of the repository (one subfolder per workspace folder).
 
-An empty note has no file: clearing a note deletes it.
+An empty draft has no file: clearing a draft deletes it.
 
 ## How Claude Code conversations are recognized
 
@@ -49,7 +91,7 @@ Things to know:
 
 - It works for conversations opened in **editor tabs**. The Claude Code sidebar view and the CLI running in
   a terminal do not reveal the conversation, so they keep whatever note was shown before.
-- A new conversation is titled "Claude Code" until its first reply. Notes typed before then are kept in
+- A new conversation is titled "Claude Code" until its first reply. Pages written before then are kept in
   `claude/.pending/` and moved into the session's note once the title appears.
 - If two open conversations have exactly the same title, the second one gets the next-newest matching
   session; renaming one of them tells them apart.
@@ -75,9 +117,15 @@ Things to know:
 - **Lock to Current Note** / **Unlock**: stop or resume following the active tab.
 - **Add Selection to Note** (`Alt+N`, `Cmd+Alt+N` on macOS): append the selection of the focused Claude Code
   conversation or editor to the current note.
-- **Open Note File in Editor**
-- **Delete Current Note**
+- **Add Selection to New Fork** (`Shift+Alt+N`, `Shift+Cmd+Alt+N` on macOS): put the selection in a new fork
+  without leaving the page shown.
+- **Open Note File in Editor**: opens the file of the page shown.
+- **Delete All Pages of This Note…**
 - **Reveal Notes Folder**
+- Page commands (also as buttons in the view): **Mark Page Sent and Start the Next One**, **Undo Mark Sent**,
+  **Fork from the Latest Sent Page**, **Split Draft into Forks…**, **Hand Off Fork to a New Conversation**,
+  **Copy Page**, **Delete Page…**, **Go to Previous/Next Turn**, **Go to Previous/Next Sibling Page**,
+  **Go to Current Draft**. They have no default keys; bind them in Keyboard Shortcuts.
 
 ## Development
 

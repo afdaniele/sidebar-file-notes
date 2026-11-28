@@ -11,8 +11,11 @@ Explorer) whose content follows the focused tab:
 - each **Claude Code conversation** opened as an editor tab has its own note;
 - focusing anything else (terminal, settings, the notes view itself, an untitled file) keeps the current note.
 
-The main use case is taking notes beside a Claude Code conversation in VS Code and having them switch
-when you switch conversations.
+Each note is a **tree of pages**, one per turn (see "Pages" below), drawn as a graph at the top of the view.
+
+The main use case is drafting the next prompt beside a Claude Code conversation while reading the last reply,
+marking it sent once pasted (which starts the next page), and forking side threads into sibling pages that
+can be handed off to new conversations.
 
 It is a fork of [AssisrMatheus/sidebar-markdown-notes](https://github.com/AssisrMatheus/sidebar-markdown-notes)
 (v1.2.0, last released 2023-05). The upstream extension kept one global list of "pages" in the webview's
@@ -23,11 +26,17 @@ Repository: https://github.com/afdaniele/sidebar-file-notes. Publisher id in `pa
 
 ## Status (as of 2026-11-27)
 
-- Implemented, unit tested (22 mocha tests), lint clean, packaged as `sidebar-file-notes-2.0.0.vsix`, and
-  installed locally by the owner.
+- Implemented, unit tested (47 mocha tests), lint clean, packaged as `sidebar-file-notes-2.0.0.vsix`, and
+  installed locally by the owner. Pages (the tree, graph, forks, handoffs) were added on 2026-11-27 and are
+  not released yet (CHANGELOG "Unreleased"); they changed the storage layout without migrating old notes, on
+  the owner's request.
 - **Not yet exercised in a live VS Code window by an agent.** Tab following, the file watcher, the
   webview and Claude tab detection are typechecked but only the pure modules have tests. Expect bugs there
-  first.
+  first. For pages, the agent that wrote them also (outside the repo, not committed) rendered the bundled
+  webview in headless Chrome with a stub `acquireVsCodeApi`, and drove the compiled `NotesController` under a
+  stub `vscode` module through new conversation -> mark sent -> pending migration -> fork -> hand off ->
+  land in another conversation -> links -> split -> delete -> external edit. Real VS Code focus, watcher and
+  QuickPick behavior remain unverified.
 - The 2.0.0 rewrite may not be committed yet: check `git status` / `git log` before assuming.
 - Not published to any marketplace. The upstream `publish.yml` (which auto-published on every push to
   `main`) was deliberately removed; `.github/workflows/ci.yml` only lints, tests, packages and uploads the
@@ -46,7 +55,7 @@ npx vsce package   # -> sidebar-file-notes-<version>.vsix
 code --install-extension sidebar-file-notes-<version>.vsix
 ```
 
-Format with `npx prettier --write src media/main.js media/tasks.js media/main.css` (config in `.prettierrc.js`:
+Format with `npx prettier --write src media/main.js media/tasks.js media/graph.js media/main.css` (config in `.prettierrc.js`:
 single quotes, no trailing commas, width 120). Node 20 is what CI uses.
 
 When installing the `.vsix`, the `code` CLI prints a Node `DEP0169 url.parse()` deprecation warning. It
@@ -57,23 +66,31 @@ comes from VS Code's CLI, not this extension (the bundle only requires `fs`, `os
 ```
 src/
   extension.ts        activate(): wires everything, registers the view and the commands
-  notesController.ts  follows the active tab, switches notes, saves, watches the note file, handles renames
-  targets.ts          TargetResolver: Tab -> NoteTarget (file note, Claude note, pending Claude note); vscode API
+  notesController.ts  follows the active tab, switches notes and pages, runs page actions, saves, watches the
+                      note folder, moves pending notes, fixes handoff links, handles renames
+  targets.ts          TargetResolver: Tab -> NoteTarget (file note, Claude note, pending Claude note), and note
+                      folder -> NoteTarget (for links); vscode API
   claudeSessions.ts   ClaudeSessionIndex: tab label -> Claude Code session id, by reading transcripts (no vscode import)
-  notePaths.ts        where note files live (no vscode import)
-  noteStore.ts        serialized reads/writes/merges/renames of note files (no vscode import)
+  notePaths.ts        where note folders live (no vscode import)
+  noteStore.ts        serialized reads/writes/removes/moves of page files and note folders (no vscode import)
+  pages.ts            page file format: header parse/serialize, ids, titles, links (no vscode import)
+  pageTree.ts         tree of a note's pages: main line, forks, navigation, delete plans, the page model (no vscode)
+  pageNote.ts         PageNote: one note in memory, real pages + in-memory empty drafts, all page writes (no vscode)
+  branches.ts         split a draft into fork items: top-level sections or list items (no vscode import)
+  handoffs.ts         HandoffRegistry: handoffs waiting for a conversation, in workspaceState (no vscode import)
   notesView.ts        NotesViewProvider: the webview view, its HTML and the message protocol
   capture.ts          reads the selection of the focused Claude conversation (via the clipboard) or text editor
   snippets.ts         formats captured text as markdown (quote, fenced code block), appendBlock (no vscode import)
   test/*.test.ts      mocha unit tests for the pure modules and media/tasks.js
 media/
   main.js             webview script (ES module, bundled by webpack into dist/webview.js)
+  graph.js            layoutGraph(): page graph lanes, rows and folds (CommonJS so tests can require it)
   tasks.js            toggleTask(): flip the n-th markdown task checkbox (CommonJS so tests can require it)
   main.css, markdown.css, vscode.css, reset.css
 ```
 
-`claudeSessions.ts`, `notePaths.ts`, `noteStore.ts` and `snippets.ts` must not import `vscode`, so they stay testable with
-plain mocha. Put new logic that can be pure in modules like these, and add tests.
+`claudeSessions.ts`, `notePaths.ts`, `noteStore.ts`, `snippets.ts`, `pages.ts`, `pageTree.ts`, `pageNote.ts`,
+`branches.ts` and `handoffs.ts` must not import `vscode`, so they stay testable with plain mocha. Put new logic that can be pure in modules like these, and add tests.
 
 ## Architecture and data flow
 
@@ -86,46 +103,67 @@ plain mocha. Put new logic that can be pure in modules like these, and add tests
    - `TabInputWebview` whose `viewType` *includes* `claudeVSCodePanel` -> Claude target (see below).
    - anything else -> `undefined`, meaning "keep the current note".
    A sequence number discards stale async results. When the view is locked, refresh does nothing.
-3. If the note path differs from the current one (or the target carries `migrateFrom`), `switchTo()` runs,
-   serialized through a promise chain:
-   `view.flush()` (webview sends unsaved typing) -> merge the pending note if `migrateFrom` -> read the note
-   file -> `view.show()` -> watch the note file -> schedule a retry if `target.unsettled`.
-   If only the title changed (same note path), `view.updateTarget()` posts a `meta` message that updates
+3. If the note folder differs from the current one (or the target carries `migrateFrom`), `doSwitch()` runs.
+   Everything that switches notes or pages, page actions and appends run through one promise queue
+   (`run()`; never call `run()` from inside a queued task, it would deadlock):
+   `view.flush()` (webview sends unsaved typing) -> move the pending note's pages if `migrateFrom` (and fix
+   handoff links) -> `PageNote.load()` -> pick the page (requested, else last shown in this note, else the
+   current draft) -> `view.show()` -> watch the note folder -> schedule a retry if `target.unsettled`.
+   If only the title changed (same note folder), `view.updateTarget()` posts a `meta` message that updates
    the header without touching the textarea (keeps cursor and undo).
-4. The webview posts `save {key, content}` (300 ms debounce, also on blur/pagehide); the controller
-   writes through `NoteStore`, but only for keys it issued (`issuedKeys`).
+4. The webview posts `save {key, pageId, content}` (300 ms debounce, also on blur/pagehide); the controller
+   writes through `PageNote`, but only for keys it issued (`issuedKeys`) and only for editable pages (drafts,
+   or the one sent page unlocked with "Edit anyway"). Saves are not queued (the queue may be waiting on a
+   flush that needs them).
+5. Buttons, graph clicks and graph arrow keys post `action {key, pageId, name, arg}`; the controller drops it
+   if the view moved to another page since, else flushes and runs it. The palette commands run the same
+   actions on the page shown.
 
 ### `NoteTarget`
 
 ```ts
-{ kind: 'file' | 'claude' | 'claude-pending', notePath, root, title, detail, tab?, migrateFrom?, unsettled? }
+{ kind: 'file' | 'claude' | 'claude-pending', noteDir, root, title, detail, tab?, migrateFrom?, unsettled? }
 ```
 
-`notePath` (absolute) is the note's identity and the `key` used in webview messages.
+`noteDir` (absolute) is the note's identity and the `key` used in webview messages; pages are identified by
+`key` + `pageId`.
 
 ### Webview message protocol (`notesView.ts` <-> `media/main.js`)
 
-Host -> webview: `load {key, kind, title, detail, content, locked}`, `meta {key, kind, title, detail}`,
-`external {key, content}` (file changed on disk; applied only if the webview has no unsaved typing),
-`append {key, block}` (captured text: appended to what the webview shows, unsaved typing included, then saved),
-`locked {locked}`, `flush {id}`, `togglePreview`.
+Host -> webview: `load {key, pageId, kind, title, detail, content, locked, model}`,
+`meta {key, kind, title, detail}`, `model {key, pageId, model}` (graph and page bar only, keeps the editor),
+`external {key, pageId, content}` (page changed on disk; applied only if the webview has no unsaved typing),
+`append {key, pageId, block}` (captured text: appended to what the webview shows, unsaved typing included,
+then saved), `focusEditor`, `locked {locked}`, `flush {id}`, `togglePreview`.
 
-Webview -> host: `ready` (host replies with `load` of the current state), `save {key, content}`,
-`flushed {id}`.
+Webview -> host: `ready` (host replies with `load` of the current state), `save {key, pageId, content}`,
+`action {key, pageId, name, arg?}`, `flushed {id}`.
 
-The webview remembers only the editor/preview mode (`vscode.setState({mode})`). It is registered with
+`model` (`ViewModel` in `notesView.ts`) = `pageModel()` from `pageTree.ts` (`nodes` in preorder for the graph,
+`page` with label, state, `editable`, available `actions`, `nav` flags) + `links` (handoff links of the page),
+`handoffs` (handoffs this empty conversation note can start from) and `sendLabel`. The webview shows only
+the buttons in `page.actions`; the controller re-checks every action anyway.
+
+The webview remembers the editor/preview mode and whether the graph is collapsed (`vscode.setState`), and
+which folds of the graph were expanded (in memory). It is registered with
 `retainContextWhenHidden: true`. `flush()` waits at most 1 s for `flushed`.
 
 ### Invariants: do not break these
 
-- **Every save carries its key.** A debounced save can arrive after the host switched notes; without
-  the key it would overwrite the wrong note.
-- **Flush before switching or merging.** `switchTo`, `deleteCurrent`, `onRenamed` and `openNoteFile` call
-  `flush()` first.
-- **An empty (whitespace-only) note has no file.** `NoteStore.write('')` deletes it, so focusing files
-  never litters the disk. `openNoteFile` creates an empty file only so it can be opened.
+- **Every save carries its key and page id.** A debounced save can arrive after the host switched notes or
+  pages; without them it would overwrite the wrong page.
+- **Flush before switching pages or notes, moving notes, or running an action.** `doSwitch`, `action`,
+  `deleteNote`, `onRenamed` and `pageFileForEditing` call `flush()` first.
+- **An empty (whitespace-only) draft with no children has no file.** `PageNote` keeps it in memory
+  ("virtual"), with its id, while the extension runs, so focusing files never litters the disk.
+  `openNoteFile` gives the page a file (`materialize`) only so it can be opened.
+- **The main line always ends with a draft.** `PageNote.tree()` adds an in-memory continuation when the last
+  main-line page is not a draft (and an in-memory root for an empty note).
+- **Sent, handed-off and dropped pages are read-only** for saves (host-side check), except the one page
+  unlocked with "Edit anyway" until the view leaves it.
 - **Writes to one file are serialized** (`NoteStore.enqueue`). `isOwnWrite()` lets the watcher ignore echoes
-  of our own writes.
+  of our own writes. `PageNote` changes memory synchronously and enqueues the write in the same tick, so a
+  flush followed by `idleUnder(noteDir)` sees every save.
 - **Focusing a tab with no note keeps the current note.** Users click into the notes view constantly, and
   that must never blank it.
 
@@ -137,18 +175,60 @@ The webview remembers only the editor/preview mode (`vscode.setState({mode})`). 
 - absolute or `~/...` -> `<setting>/<encoded folder path>` (encoding = `projectDirName`, same as Claude Code's);
 - no workspace open -> `<globalStorage>/no-workspace`.
 
-Inside a root:
+Inside a root, one folder per note:
 
 ```
-files/<path relative to the folder>.md   file notes
-external/<encoded absolute path>.md      files outside all workspace folders (stored in the first folder's root)
-claude/<sessionId>.md                    Claude conversation notes (root of the folder whose transcript dir matched)
-claude/.pending/<uuid>.md                notes of a conversation not identified yet (always in the default root)
+files/<path relative to the folder>.pages/   file notes (suffix keeps them apart from folder paths)
+external/<encoded absolute path>.pages/      files outside all workspace folders (stored in the first folder's root)
+claude/<sessionId>/                          Claude conversation notes (root of the folder whose transcript dir matched)
+claude/.pending/<uuid>/                      notes of a conversation not identified yet (always in the default root)
 ```
 
 The default root is the first workspace folder's root. Renames inside VS Code (`onDidRenameFiles`) move
-`files/<old>.md` and, for folders, the `files/<old>/` directory; the move is skipped if the destination exists.
-Deleted files keep their notes (orphans are intentional).
+`files/<old>.pages/` and, for folders, the `files/<old>/` directory; the move is skipped if the destination
+exists. Deleted files keep their notes (orphans are intentional). Single-file notes of the first 2.0.0
+layout (`files/<path>.md`, `claude/<id>.md`) are ignored: no migration, by the owner's choice.
+
+## Pages
+
+A note folder holds `<pageId>.md` files; `pageId` = `YYYYMMDD-HHMMSS-<6 hex>` (UTC creation time). Each file
+starts with a header (`pages.ts`), then the markdown body:
+
+```
+---
+parent: <pageId>          absent for a root
+fork: true                absent for the main line's continuation
+state: draft | sent | handed-off | dropped
+created: <ISO>            orders siblings (PageNote makes it strictly increasing)
+sentAt: <ISO>
+title: ...                optional, overrides the first line
+from: <note ref>#<pageId>       handoff source (on the first page of the receiving note)
+handoffTo: <note ref>#<pageId>  handoff destination (on the handed-off fork)
+---
+```
+
+Unknown header keys are kept as they are (`extra`). The key `transcript` is reserved for linking a sent page
+to its user message in the Claude Code transcript (session id + message uuid), for a future "jump to where
+this was sent"; nothing writes it yet. A note ref is the note folder relative to its notes root with `/`
+(`claude/<sessionId>`, `files/src/a.ts.pages`); links are resolved against every root in use.
+
+Tree rules (`pageTree.ts`): a node's continuation is its first non-fork child (by `created`, then id);
+other children are forks. The main line is the main root (first non-fork root) and its continuations; its
+last page is the current draft. Pages whose parent is missing (and cycles) become extra roots. Forks are
+offered only from the latest sent page (`forkParent`, the one place to relax that later). Only the current
+draft can be marked sent; only forks can be handed off or dropped; "Undo sent" works while the continuation
+is empty and alone. Deleting asks (modal); with real pages below, it offers "delete the subtree" or "keep the
+children" (they move to the parent, the continuation inherits the deleted page's fork flag).
+
+Handoffs: "Hand off" marks the fork `handed-off`, copies it and records it in `HandoffRegistry`
+(workspaceState). A Claude note with no page files lists the waiting handoffs; "land" creates its root page
+(`sent`, `from` = the fork) and, if the note already has a session, sets the fork's `handoffTo`. For a pending
+note that happens in `migrate()`, which rewrites the links of moved pages to the session folder. Following a
+link (`openLink`) locks the view on the linked note.
+
+Graph (`media/graph.js`): columns are depths; the main lane is row 0; each fork chain is a lane packed into
+the first free row below its parent (interval `[parentCol + 0.5, lastCol]`). Runs of >= 4 sent pages without
+forks, away from the current page, the root and the last two pages, fold into one counted cell.
 
 ## Claude Code integration: how it works and what it depends on
 
@@ -230,8 +310,13 @@ clipboard = nothing selected. Non-text clipboard contents are lost (restored as 
   (`cmd+alt+n` on macOS) gated on `activeWebviewPanelId =~ /claudeVSCodePanel/ && !focusedView ...`.
   Both context keys hold the unprefixed view type (`providedViewType`).
 - If the active tab is a Claude tab it captures from the webview, else from `activeTextEditor`
-  (code block under `path:line`). `NotesController.append` runs in the `switching` chain; the view appends
-  (`append` message) or, if the webview is not resolved, the controller writes the file.
+  (code block under `path:line`). `NotesController.append` runs in the controller queue; it targets the page
+  shown if it is a draft, else the current draft. The view appends (`append` message) or, if the webview is
+  not resolved or shows another page, the controller writes the page.
+- `addSelectionToNewFork` (`NotesController.appendToNewFork`) writes the capture as a new fork page and only
+  refreshes the graph (`model` message): the view stays on the page shown. The fork's parent is
+  `siblingForkParent()`: a sibling of the page shown when it can be forked from (the current draft or a fork
+  of the latest sent page), else a sibling of the current draft; nothing while no page was sent.
 - Not yet verified live: the focus timing of the context-menu path, and whether copy from Claude's
   rendered markdown gives sensible plain text.
 
@@ -263,9 +348,13 @@ Settings (`sidebarFileNotes.*`): `notesDirectory` (`.notes`), `claudeCode.enable
 `claudeCode.configDir` (empty), `leftMargin` (`false`).
 
 Commands: `togglePreview`, `lock` / `unlock` (context key `sidebarFileNotes.locked` swaps the title-bar icon),
-`openNoteFile`, `deleteNote` (modal confirm), `revealNotesFolder`. All are in the view title bar (`navigation`
-group) or its `…` menu (`more` group). `addSelection` is in the Claude conversation and editor context
-menus and bound to `alt+n` / `cmd+alt+n`.
+`openNoteFile` (the page shown), `deleteNote` (all pages, modal confirm), `revealNotesFolder`. All are in the
+view title bar (`navigation` group) or its `…` menu (`more` group). Page commands (palette only, no default
+keys; `PAGE_COMMANDS` in `extension.ts` maps them to actions): `markSent`, `undoSent`, `fork`,
+`splitIntoForks`, `handOff`, `copyPage`, `deletePage`, `previousTurn`, `nextTurn`, `previousSibling`,
+`nextSibling`, `goToDraft`. `addSelection` is in the Claude conversation and editor context
+menus and bound to `alt+n` / `cmd+alt+n`; `addSelectionToNewFork` sits next to it in both menus and is bound
+to `shift+alt+n` / `shift+cmd+alt+n` (same `when`).
 
 ## Webview details
 
@@ -281,15 +370,20 @@ menus and bound to `alt+n` / `cmd+alt+n`.
 ## Testing
 
 - `npm test` covers `claudeSessions.ts` (matching, incremental reads, partial and huge lines, exclusion,
-  fallback, placeholder), `notePaths.ts`, `noteStore.ts` (ordering, deletion when empty, merge, rename) and
-  `toggleTask`. Tests use temp dirs under `os.tmpdir()`.
+  fallback, placeholder, lookup by id), `notePaths.ts`, `noteStore.ts` (ordering, deletion when empty, list,
+  move, remove, rename), `pages.ts`, `pageTree.ts`, `branches.ts`, `pageNote.ts` (on disk), `handoffs.ts`,
+  `layoutGraph` and `toggleTask`. Tests use temp dirs under `os.tmpdir()`.
+- Headless rendering works in the sandbox with Playwright's `chrome-headless-shell`
+  (`~/.cache/ms-playwright/chromium_headless_shell-*/`, run with `HOME` and `--user-data-dir` in a writable
+  temp dir and `--no-sandbox`); the system `google-chrome` aborts there.
 - There is no integration test with a real VS Code. The upstream `vscode-test` scaffold was removed.
   Adding `@vscode/test-electron` tests for `TargetResolver`/`NotesController` would be valuable; they need a
   display (xvfb was not available on the owner's machine, and launching VS Code on the owner's desktop
   without asking is intrusive).
 - Manual check: F5 or install the `.vsix`, open files and Claude Code conversation tabs, and check that the
   header (kind badge, title, detail) and content follow. Type in a brand-new conversation before Claude replies
-  and check the note moves to `claude/<sessionId>.md` once the title appears.
+  and check the pages move to `claude/<sessionId>/` once the title appears. Mark sent, fork, split, hand off a
+  fork and land it in a new conversation; check both pages link to each other.
 
 ## Known limitations and ideas
 
@@ -297,7 +391,14 @@ menus and bound to `alt+n` / `cmd+alt+n`.
   Claude Code hook (e.g. `SessionStart` / `UserPromptSubmit`) writing the session id somewhere the extension
   reads, but it still would not know which one is focused.
 - Two open conversations with the same title: the second gets the next-newest matching session.
-- Orphaned `claude/.pending/*.md` remain if a conversation tab is closed before it ever gets a title.
+- Orphaned `claude/.pending/<id>/` folders remain if a conversation tab is closed before it ever gets a title.
+- In-memory pages (empty drafts and empty forks) are lost when VS Code reloads; empty pages of a pending note
+  are not carried over when it moves to its session.
+- A handoff landed in a conversation whose tab closes before it gets a title leaves the fork "waiting"
+  (cancel the hand-off to fix it).
+- Not done yet (deferred by the owner): moving a page to another parent, forking from older turns,
+  marking pages sent automatically from the transcript, jumping to the conversation turn of a page,
+  searching across notes.
 - Notes of files outside VS Code renames/deletes are not moved or cleaned up.
 - No migration of notes from the upstream extension (different extension id, notes were in webview state).
 - Ideas: let Claude Code read/write the conversation note (it is a plain file at a predictable path); a
@@ -313,5 +414,7 @@ menus and bound to `alt+n` / `cmd+alt+n`.
    toolchain (TypeScript 5, webpack 5, eslint 8 + prettier 3, `@vscode/vsce` 3, `@types/vscode` ~1.75,
    engine `^1.75.0`), vendored `media/lib` replaced by npm `marked`/`dompurify` bundled with webpack.
    Removed upstream features: multiple pages, status bar item, reset/export commands, lodash.
-3. `extensionKind` is `["workspace"]`, so in remote setups the extension runs where the files and the
+3. Pages (2026-11-27): planned with the owner (see "Pages"), then implemented in one go: storage as one
+   folder per note, the page tree, mark sent/undo, forks and split, handoffs with links, the graph.
+4. `extensionKind` is `["workspace"]`, so in remote setups the extension runs where the files and the
    Claude Code transcripts are. `virtualWorkspaces` are not supported (it uses Node `fs`).

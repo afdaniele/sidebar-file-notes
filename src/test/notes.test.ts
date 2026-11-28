@@ -3,7 +3,15 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeNotePath, fileNotePath, isInside, notesRootFor, pendingClaudeNotePath } from '../notePaths';
+import {
+  claudeNoteDir,
+  fileNoteDir,
+  isInside,
+  noteDirOfRef,
+  noteRef,
+  notesRootFor,
+  pendingClaudeNoteDir
+} from '../notePaths';
 import { NoteStore } from '../noteStore';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -13,9 +21,16 @@ describe('notePaths', () => {
   it('keeps notes inside the workspace folder for a relative setting', () => {
     const root = notesRootFor('/work/app', '.notes');
     assert.strictEqual(root, path.join('/work/app', '.notes'));
-    assert.strictEqual(fileNotePath(root, 'src/index.ts'), path.join('/work/app/.notes/files/src/index.ts.md'));
-    assert.strictEqual(claudeNotePath(root, 'abc-123'), path.join('/work/app/.notes/claude/abc-123.md'));
-    assert.strictEqual(pendingClaudeNotePath(root, '../x'), path.join('/work/app/.notes/claude/.pending/___x.md'));
+    assert.strictEqual(fileNoteDir(root, 'src/index.ts'), path.join('/work/app/.notes/files/src/index.ts.pages'));
+    assert.strictEqual(claudeNoteDir(root, 'abc-123'), path.join('/work/app/.notes/claude/abc-123'));
+    assert.strictEqual(pendingClaudeNoteDir(root, '../x'), path.join('/work/app/.notes/claude/.pending/___x'));
+  });
+
+  it('names a note folder relative to its root, for links', () => {
+    const root = path.join('/work/app', '.notes');
+    const dir = fileNoteDir(root, path.join('src', 'a.ts'));
+    assert.strictEqual(noteRef(root, dir), 'files/src/a.ts.pages');
+    assert.strictEqual(noteDirOfRef(root, 'files/src/a.ts.pages'), dir);
   });
 
   it('uses one subfolder per workspace for an absolute or home-relative setting', () => {
@@ -56,15 +71,31 @@ describe('NoteStore', () => {
     assert.strictEqual(await store.read(file), '');
   });
 
-  it('merges a pending note into an existing one', async () => {
+  it('lists, moves and removes the page files of a note folder', async () => {
     const store = new NoteStore();
-    const pending = path.join(dir, 'claude', '.pending', 'p.md');
-    const session = path.join(dir, 'claude', 's.md');
-    await store.write(pending, 'typed before the title');
-    await store.write(session, 'existing\n');
-    await store.merge(pending, session);
-    assert.strictEqual(await store.read(session), 'existing\n\ntyped before the title');
-    await assert.rejects(fs.stat(pending));
+    const pending = path.join(dir, 'claude', '.pending', 'p');
+    const session = path.join(dir, 'claude', 's');
+    assert.deepStrictEqual(await store.list(pending), []);
+    await store.write(path.join(pending, 'b.md'), 'B');
+    await store.write(path.join(pending, 'a.md'), 'A');
+    await fs.mkdir(path.join(pending, 'sub.md'));
+    assert.deepStrictEqual(await store.list(pending), [
+      { name: 'a.md', text: 'A' },
+      { name: 'b.md', text: 'B' }
+    ]);
+    await fs.rmdir(path.join(pending, 'sub.md'));
+    await store.write(path.join(session, 'b.md'), 'existing');
+    assert.deepStrictEqual(await store.moveFiles(pending, session), ['a.md']);
+    assert.strictEqual(await store.read(path.join(session, 'a.md')), 'A');
+    assert.strictEqual(await store.read(path.join(session, 'b.md')), 'existing');
+    await store.remove(path.join(session, 'a.md'));
+    assert.ok(store.isOwnWrite(path.join(session, 'a.md'), ''));
+    assert.deepStrictEqual(
+      (await store.list(session)).map((f) => f.name),
+      ['b.md']
+    );
+    await store.removeDir(session);
+    await assert.rejects(fs.stat(session));
   });
 
   it('renames only when the destination is free', async () => {
